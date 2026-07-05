@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { WorldGenerator } from './WorldGenerator.js';
 import { Pawn } from './Pawn.js';
-import { createItem, Recipes } from './Item.js';
+import { createItem, Recipes, canCraft, craftItem } from './Item.js';
 
 // === CORE SETUP ===
 const scene = new THREE.Scene();
@@ -46,7 +46,7 @@ world.generate(12345);
 const playerPawn = new Pawn(scene, new THREE.Vector3(0, 0, 0), true);
 const pawns = [playerPawn];
 
-// Add a simple visual "workbench" in the world for crafting
+// Workbench
 const workbench = new THREE.Mesh(
   new THREE.BoxGeometry(8, 3, 8),
   new THREE.MeshLambertMaterial({ color: 0x555555 })
@@ -55,29 +55,108 @@ workbench.position.set(40, 2, 30);
 scene.add(workbench);
 workbench.userData = { type: 'workbench' };
 
-// Mouse + Keyboard controls
+// Some loose items on the ground for pickup demo
+const looseItems = [];
+function spawnLooseItem(key, x, z) {
+  const itemData = createItem(key);
+  if (!itemData) return;
+  
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 1, 2),
+    new THREE.MeshLambertMaterial({ color: 0x996633 })
+  );
+  mesh.position.set(x, 1.5, z);
+  mesh.userData = { type: 'loose_item', itemData: itemData };
+  scene.add(mesh);
+  looseItems.push(mesh);
+}
+
+// Spawn a few loose items near start
+spawnLooseItem('duct_tape', 15, 10);
+spawnLooseItem('cloth', -20, 25);
+spawnLooseItem('scrap_metal', 35, -15);
+
+// === IMPROVED INTERACTION ===
 function onMouseDown(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
 
-  if (event.button === 0) {
-    // Select pawn
-    const pawnIntersects = raycaster.intersectObjects(pawns.map(p => p.mesh));
+  if (event.button === 0) { // Left click
+    const allIntersects = raycaster.intersectObjects(scene.children, true);
+
+    // 1. Try selecting a pawn first
+    const pawnIntersects = allIntersects.filter(i => pawns.some(p => p.mesh === i.object));
     if (pawnIntersects.length > 0) {
-      const clicked = pawns.find(p => p.mesh === pawnIntersects[0].object);
-      if (clicked) {
-        selectedPawns = [clicked];
-        console.log(`%c[RUIN] Selected: ${clicked.name}`, 'color:#c9b896');
-      }
-    } else {
-      // Check for workbench or resource nodes
-      const allIntersects = raycaster.intersectObjects(scene.children, true);
-      const workbenchHit = allIntersects.find(i => i.object.userData?.type === 'workbench');
-      if (workbenchHit && selectedPawns.length > 0) {
-        console.log('%c[RUIN] At workbench. Type craft("bandage") or craft("spiked_bat") in console to craft.', 'color:#aadd88');
+      const clickedPawn = pawns.find(p => p.mesh === pawnIntersects[0].object);
+      if (clickedPawn) {
+        selectedPawns = [clickedPawn];
+        console.log(`%c[RUIN] Selected: ${clickedPawn.name}`, 'color:#c9b896');
+        return;
       }
     }
+
+    // 2. Check for resource nodes
+    const nodeHit = allIntersects.find(i => i.object.userData?.type === 'resource_node');
+    if (nodeHit && selectedPawns.length > 0) {
+      const node = nodeHit.object;
+      const pawn = selectedPawns[0];
+      
+      if (node.userData.remaining > 0) {
+        const itemKey = node.userData.dropItem;
+        const item = createItem(itemKey);
+        if (item) {
+          pawn.addItem(item);
+          node.userData.remaining--;
+          console.log(`%c[RUIN] Scavenged ${node.userData.name} → got ${item.name}`, 'color:#aadd88');
+          
+          // Deplete visual when empty
+          if (node.userData.remaining <= 0) {
+            node.material.color.setHex(0x222222);
+          }
+        }
+      } else {
+        console.log('%c[RUIN] This node is depleted.', 'color:#666');
+      }
+      return;
+    }
+
+    // 3. Check for loose items on ground
+    const looseHit = allIntersects.find(i => i.object.userData?.type === 'loose_item');
+    if (looseHit && selectedPawns.length > 0) {
+      const itemMesh = looseHit.object;
+      const itemData = itemMesh.userData.itemData;
+      const pawn = selectedPawns[0];
+      
+      pawn.addItem(itemData);
+      scene.remove(itemMesh);
+      const idx = looseItems.indexOf(itemMesh);
+      if (idx !== -1) looseItems.splice(idx, 1);
+      
+      console.log(`%c[RUIN] Picked up ${itemData.name} from the ground`, 'color:#aadd88');
+      return;
+    }
+
+    // 4. Workbench interaction
+    const workbenchHit = allIntersects.find(i => i.object.userData?.type === 'workbench');
+    if (workbenchHit && selectedPawns.length > 0) {
+      const pawn = selectedPawns[0];
+      console.log('%c[RUIN] === WORKBENCH ===', 'color:#c9b896');
+      console.log('Available recipes you can craft:');
+      
+      Object.keys(Recipes).forEach(key => {
+        const recipe = Recipes[key];
+        const possible = canCraft(pawn, key);
+        const status = possible ? '✓ Can craft' : '✗ Missing materials';
+        console.log(`  ${recipe.name} - ${status}`);
+      });
+      
+      console.log('%cType craft("recipe_key") in console to craft (e.g. craft("bandage"))', 'color:#888');
+      return;
+    }
+
+    // Default: clear selection
+    selectedPawns = [];
   }
 
   if (event.button === 2 && selectedPawns.length > 0) {
@@ -119,24 +198,20 @@ function onWheel(event) {
   camera.updateProjectionMatrix();
 }
 
-// Keyboard for quick actions
+// Keyboard shortcuts
 window.addEventListener('keydown', (e) => {
   if (!selectedPawns.length) return;
   const pawn = selectedPawns[0];
 
-  if (e.key.toLowerCase() === 'i') {
-    pawn.listInventory();
-  }
+  if (e.key.toLowerCase() === 'i') pawn.listInventory();
+  
   if (e.key.toLowerCase() === 'c') {
-    // Quick craft examples
-    console.log('%c[RUIN] Attempting to craft bandage...', 'color:#aadd88');
-    import('./Item.js').then(({ craftItem }) => {
-      craftItem(pawn, 'bandage');
-    });
+    console.log('%c[RUIN] Quick crafting bandage...', 'color:#aadd88');
+    craftItem(pawn, 'bandage');
   }
+  
   if (e.key.toLowerCase() === 's') {
-    // Scavenge nearby (prototype)
-    console.log('%c[RUIN] Scavenging...', 'color:#aadd88');
+    console.log('%c[RUIN] Quick scavenge for scrap...', 'color:#aadd88');
     const scrap = createItem('scrap_metal');
     if (scrap) pawn.addItem(scrap);
   }
@@ -179,5 +254,5 @@ function animate() {
 
 animate();
 
-console.log('%c[RUIN RECLAIMER] Lone Survivor + Crafting active.', 'color:#c9b896');
-console.log('%cControls: Left-click select | Right-click move | I = inventory | C = craft bandage | S = scavenge scrap', 'color:#888');
+console.log('%c[RUIN RECLAIMER] World Interaction Polished.', 'color:#c9b896');
+console.log('%cLeft-click resource nodes or loose items to interact. Click workbench for recipe list.', 'color:#888');
