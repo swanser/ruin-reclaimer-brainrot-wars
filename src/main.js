@@ -55,12 +55,10 @@ workbench.position.set(40, 2, 30);
 scene.add(workbench);
 workbench.userData = { type: 'workbench' };
 
-// Some loose items on the ground for pickup demo
-const looseItems = [];
+// Loose items
 function spawnLooseItem(key, x, z) {
   const itemData = createItem(key);
   if (!itemData) return;
-  
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(2, 1, 2),
     new THREE.MeshLambertMaterial({ color: 0x996633 })
@@ -68,94 +66,150 @@ function spawnLooseItem(key, x, z) {
   mesh.position.set(x, 1.5, z);
   mesh.userData = { type: 'loose_item', itemData: itemData };
   scene.add(mesh);
-  looseItems.push(mesh);
 }
 
-// Spawn a few loose items near start
 spawnLooseItem('duct_tape', 15, 10);
 spawnLooseItem('cloth', -20, 25);
 spawnLooseItem('scrap_metal', 35, -15);
 
-// === IMPROVED INTERACTION ===
+// === CHARACTER SHEET FUNCTIONS ===
+window.showCharacterSheet = function(pawn) {
+  const sheet = document.getElementById('character-sheet');
+  if (!sheet || !pawn) return;
+
+  document.getElementById('sheet-name').textContent = pawn.name;
+  document.getElementById('sheet-backstory').textContent = pawn.backstory || 'No memories remain.';
+
+  // Traits
+  const traitsDiv = document.getElementById('sheet-traits');
+  traitsDiv.innerHTML = '';
+  if (pawn.traits && pawn.traits.length > 0) {
+    pawn.traits.forEach(trait => {
+      const div = document.createElement('div');
+      div.className = 'trait';
+      div.innerHTML = `<strong>${trait.name}</strong><br><small>${trait.desc}</small>`;
+      traitsDiv.appendChild(div);
+    });
+  } else {
+    traitsDiv.innerHTML = '<div style="color:#665533">No notable traits yet.</div>';
+  }
+
+  // Skills
+  const skillsDiv = document.getElementById('sheet-skills');
+  skillsDiv.innerHTML = '';
+  if (pawn.skills) {
+    Object.entries(pawn.skills).forEach(([skill, level]) => {
+      const div = document.createElement('div');
+      div.className = 'skill';
+      div.innerHTML = `${skill.charAt(0).toUpperCase() + skill.slice(1)} <span style="color:#aa8866">${level}</span>`;
+      skillsDiv.appendChild(div);
+    });
+  }
+
+  // Equipment
+  const equipDiv = document.getElementById('sheet-equipment');
+  equipDiv.innerHTML = '';
+  if (pawn.equipment) {
+    Object.entries(pawn.equipment).forEach(([slot, item]) => {
+      const div = document.createElement('div');
+      div.className = 'equipment-slot';
+      const itemName = item ? item.name : '— Empty —';
+      div.innerHTML = `${slot.toUpperCase()}: <span style="color:#aa8866">${itemName}</span>`;
+      equipDiv.appendChild(div);
+    });
+  }
+
+  // Inventory
+  const invDiv = document.getElementById('sheet-inventory');
+  invDiv.innerHTML = '';
+  if (pawn.inventory && pawn.inventory.length > 0) {
+    pawn.inventory.forEach(item => {
+      const div = document.createElement('div');
+      div.className = 'inventory-item';
+      div.textContent = item.name;
+      invDiv.appendChild(div);
+    });
+  } else {
+    invDiv.innerHTML = '<div style="color:#665533">Inventory is empty.</div>';
+  }
+
+  sheet.style.display = 'block';
+};
+
+window.hideCharacterSheet = function() {
+  const sheet = document.getElementById('character-sheet');
+  if (sheet) sheet.style.display = 'none';
+};
+
+// === INTERACTION ===
 function onMouseDown(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
 
-  if (event.button === 0) { // Left click
+  if (event.button === 0) {
     const allIntersects = raycaster.intersectObjects(scene.children, true);
 
-    // 1. Try selecting a pawn first
+    // Pawn selection
     const pawnIntersects = allIntersects.filter(i => pawns.some(p => p.mesh === i.object));
     if (pawnIntersects.length > 0) {
       const clickedPawn = pawns.find(p => p.mesh === pawnIntersects[0].object);
       if (clickedPawn) {
         selectedPawns = [clickedPawn];
         console.log(`%c[RUIN] Selected: ${clickedPawn.name}`, 'color:#c9b896');
+        
+        // Auto-open character sheet for player pawn
+        if (clickedPawn.isPlayer) {
+          setTimeout(() => {
+            window.showCharacterSheet(clickedPawn);
+          }, 120);
+        }
         return;
       }
     }
 
-    // 2. Check for resource nodes
+    // Resource nodes, loose items, workbench (same logic as before)
     const nodeHit = allIntersects.find(i => i.object.userData?.type === 'resource_node');
     if (nodeHit && selectedPawns.length > 0) {
       const node = nodeHit.object;
       const pawn = selectedPawns[0];
-      
       if (node.userData.remaining > 0) {
-        const itemKey = node.userData.dropItem;
-        const item = createItem(itemKey);
+        const item = createItem(node.userData.dropItem);
         if (item) {
           pawn.addItem(item);
           node.userData.remaining--;
-          console.log(`%c[RUIN] Scavenged ${node.userData.name} → got ${item.name}`, 'color:#aadd88');
-          
-          // Deplete visual when empty
-          if (node.userData.remaining <= 0) {
-            node.material.color.setHex(0x222222);
-          }
+          console.log(`%c[RUIN] Scavenged ${node.userData.name} → ${item.name}`, 'color:#aadd88');
+          if (node.userData.remaining <= 0) node.material.color.setHex(0x222222);
         }
-      } else {
-        console.log('%c[RUIN] This node is depleted.', 'color:#666');
       }
       return;
     }
 
-    // 3. Check for loose items on ground
     const looseHit = allIntersects.find(i => i.object.userData?.type === 'loose_item');
     if (looseHit && selectedPawns.length > 0) {
       const itemMesh = looseHit.object;
       const itemData = itemMesh.userData.itemData;
-      const pawn = selectedPawns[0];
-      
-      pawn.addItem(itemData);
+      selectedPawns[0].addItem(itemData);
       scene.remove(itemMesh);
       const idx = looseItems.indexOf(itemMesh);
       if (idx !== -1) looseItems.splice(idx, 1);
-      
-      console.log(`%c[RUIN] Picked up ${itemData.name} from the ground`, 'color:#aadd88');
+      console.log(`%c[RUIN] Picked up ${itemData.name}`, 'color:#aadd88');
       return;
     }
 
-    // 4. Workbench interaction
     const workbenchHit = allIntersects.find(i => i.object.userData?.type === 'workbench');
     if (workbenchHit && selectedPawns.length > 0) {
       const pawn = selectedPawns[0];
       console.log('%c[RUIN] === WORKBENCH ===', 'color:#c9b896');
-      console.log('Available recipes you can craft:');
-      
       Object.keys(Recipes).forEach(key => {
         const recipe = Recipes[key];
         const possible = canCraft(pawn, key);
-        const status = possible ? '✓ Can craft' : '✗ Missing materials';
-        console.log(`  ${recipe.name} - ${status}`);
+        console.log(`  ${recipe.name} ${possible ? '✓' : '✗'}`);
       });
-      
-      console.log('%cType craft("recipe_key") in console to craft (e.g. craft("bandage"))', 'color:#888');
+      console.log('%cPress C to quick-craft bandage, or use console: craft("recipe_key")', 'color:#888');
       return;
     }
 
-    // Default: clear selection
     selectedPawns = [];
   }
 
@@ -198,20 +252,26 @@ function onWheel(event) {
   camera.updateProjectionMatrix();
 }
 
-// Keyboard shortcuts
+// Keyboard
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    if (playerPawn) {
+      const sheet = document.getElementById('character-sheet');
+      if (sheet.style.display === 'block') {
+        window.hideCharacterSheet();
+      } else {
+        window.showCharacterSheet(playerPawn);
+      }
+    }
+  }
+
   if (!selectedPawns.length) return;
   const pawn = selectedPawns[0];
 
   if (e.key.toLowerCase() === 'i') pawn.listInventory();
-  
-  if (e.key.toLowerCase() === 'c') {
-    console.log('%c[RUIN] Quick crafting bandage...', 'color:#aadd88');
-    craftItem(pawn, 'bandage');
-  }
-  
+  if (e.key.toLowerCase() === 'c') craftItem(pawn, 'bandage');
   if (e.key.toLowerCase() === 's') {
-    console.log('%c[RUIN] Quick scavenge for scrap...', 'color:#aadd88');
     const scrap = createItem('scrap_metal');
     if (scrap) pawn.addItem(scrap);
   }
@@ -254,5 +314,5 @@ function animate() {
 
 animate();
 
-console.log('%c[RUIN RECLAIMER] World Interaction Polished.', 'color:#c9b896');
-console.log('%cLeft-click resource nodes or loose items to interact. Click workbench for recipe list.', 'color:#888');
+console.log('%c[RUIN RECLAIMER] Character Sheet UI active.', 'color:#c9b896');
+console.log('%cLeft-click yourself or press TAB to open Character Sheet. Gritty terminal style.', 'color:#888');
