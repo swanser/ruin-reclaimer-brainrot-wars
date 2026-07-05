@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { WorldGenerator } from './WorldGenerator.js';
 import { Pawn } from './Pawn.js';
+import { createItem, Recipes } from './Item.js';
 
-// === CORE THREE.JS SETUP - TOP DOWN RTS/RPG VIEW ===
+// === CORE SETUP ===
 const scene = new THREE.Scene();
 const camera = new THREE.OrthographicCamera(
   window.innerWidth / -2, window.innerWidth / 2,
@@ -29,7 +30,6 @@ scene.add(dirLight);
 const fogColor = new THREE.Color(0x2a2520);
 scene.fog = new THREE.Fog(fogColor, 300, 1200);
 
-// Input
 let selectedPawns = [];
 let isDragging = false;
 let lastMouseX = 0;
@@ -43,37 +43,47 @@ const world = new WorldGenerator(scene);
 world.generate(12345);
 
 // === LONE SURVIVOR START ===
-// The player begins as a single personal pawn
-const playerPawn = new Pawn(scene, new THREE.Vector3(0, 0, 0), true); // isPlayer = true
+const playerPawn = new Pawn(scene, new THREE.Vector3(0, 0, 0), true);
 const pawns = [playerPawn];
 
-// Mouse controls (same as before but improved selection)
+// Add a simple visual "workbench" in the world for crafting
+const workbench = new THREE.Mesh(
+  new THREE.BoxGeometry(8, 3, 8),
+  new THREE.MeshLambertMaterial({ color: 0x555555 })
+);
+workbench.position.set(40, 2, 30);
+scene.add(workbench);
+workbench.userData = { type: 'workbench' };
+
+// Mouse + Keyboard controls
 function onMouseDown(event) {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
   mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(mouse, camera);
 
   if (event.button === 0) {
-    const intersects = raycaster.intersectObjects(pawns.map(p => p.mesh));
-    if (intersects.length > 0) {
-      const clicked = pawns.find(p => p.mesh === intersects[0].object);
+    // Select pawn
+    const pawnIntersects = raycaster.intersectObjects(pawns.map(p => p.mesh));
+    if (pawnIntersects.length > 0) {
+      const clicked = pawns.find(p => p.mesh === pawnIntersects[0].object);
       if (clicked) {
         selectedPawns = [clicked];
         console.log(`%c[RUIN] Selected: ${clicked.name}`, 'color:#c9b896');
-        if (clicked.isPlayer) {
-          console.log('%c[RUIN] This is YOU - the lone survivor.', 'color:#aadd88');
-        }
       }
     } else {
-      selectedPawns = [];
+      // Check for workbench or resource nodes
+      const allIntersects = raycaster.intersectObjects(scene.children, true);
+      const workbenchHit = allIntersects.find(i => i.object.userData?.type === 'workbench');
+      if (workbenchHit && selectedPawns.length > 0) {
+        console.log('%c[RUIN] At workbench. Type craft("bandage") or craft("spiked_bat") in console to craft.', 'color:#aadd88');
+      }
     }
   }
 
   if (event.button === 2 && selectedPawns.length > 0) {
     const groundIntersects = raycaster.intersectObject(world.ground);
     if (groundIntersects.length > 0) {
-      const targetPos = groundIntersects[0].point;
-      selectedPawns.forEach(p => p.moveTo(targetPos));
+      selectedPawns.forEach(p => p.moveTo(groundIntersects[0].point));
     }
   }
 
@@ -109,6 +119,29 @@ function onWheel(event) {
   camera.updateProjectionMatrix();
 }
 
+// Keyboard for quick actions
+window.addEventListener('keydown', (e) => {
+  if (!selectedPawns.length) return;
+  const pawn = selectedPawns[0];
+
+  if (e.key.toLowerCase() === 'i') {
+    pawn.listInventory();
+  }
+  if (e.key.toLowerCase() === 'c') {
+    // Quick craft examples
+    console.log('%c[RUIN] Attempting to craft bandage...', 'color:#aadd88');
+    import('./Item.js').then(({ craftItem }) => {
+      craftItem(pawn, 'bandage');
+    });
+  }
+  if (e.key.toLowerCase() === 's') {
+    // Scavenge nearby (prototype)
+    console.log('%c[RUIN] Scavenging...', 'color:#aadd88');
+    const scrap = createItem('scrap_metal');
+    if (scrap) pawn.addItem(scrap);
+  }
+});
+
 window.addEventListener('mousedown', onMouseDown);
 window.addEventListener('mouseup', onMouseUp);
 window.addEventListener('mousemove', onMouseMove);
@@ -136,10 +169,8 @@ function animate() {
     const p = pawns[0];
     statusEl.innerHTML = `
       ${p.isPlayer ? 'YOU' : p.name} | 
-      H:${Math.floor(p.needs.health)} 
-      Hu:${Math.floor(p.needs.hunger)} 
-      Th:${Math.floor(p.needs.thirst)} 
-      San:${Math.floor(p.needs.sanity)}
+      H:${Math.floor(p.needs.health)} Hu:${Math.floor(p.needs.hunger)} 
+      Th:${Math.floor(p.needs.thirst)} San:${Math.floor(p.needs.sanity)} | Inv:${p.inventory.length}
     `;
   }
 
@@ -148,5 +179,5 @@ function animate() {
 
 animate();
 
-console.log('%c[RUIN RECLAIMER] Lone Survivor mode active. This is YOU.', 'color:#c9b896');
-console.log('%cSelect yourself and right-click to move. Watch your needs decay.', 'color:#888');
+console.log('%c[RUIN RECLAIMER] Lone Survivor + Crafting active.', 'color:#c9b896');
+console.log('%cControls: Left-click select | Right-click move | I = inventory | C = craft bandage | S = scavenge scrap', 'color:#888');

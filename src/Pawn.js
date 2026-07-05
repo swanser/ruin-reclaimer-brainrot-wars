@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-// === SIMPLE PROCEDURAL GENERATORS ===
+// === SIMPLE PROCEDURAL GENERATORS (same as before) ===
 function generateName() {
   const first = ['Jax', 'Rook', 'Vesper', 'Kael', 'Soren', 'Lira', 'Drax', 'Nyx', 'Torin', 'Elara'];
   const last = ['Ashwalker', 'Scrapborn', 'Radveil', 'Ironvein', 'Dustborn', 'Voidtongue', 'Rustblood', 'Ashmarked'];
@@ -34,7 +34,6 @@ function generateTraits() {
     { name: 'Berserker', desc: 'Combat effectiveness increases when health is low.', effect: { lowHealthCombat: 1.5 } },
     { name: 'Ghost', desc: 'Harder to detect when moving alone. Good for stealth.', effect: { stealth: 2 } }
   ];
-  // Start with 1-2 random traits for prototype
   const count = 1 + Math.floor(Math.random() * 2);
   const shuffled = [...possibleTraits].sort(() => 0.5 - Math.random());
   return shuffled.slice(0, count);
@@ -46,17 +45,15 @@ export class Pawn {
     this.position = position.clone();
     this.target = null;
     this.speed = 1.8;
-    this.isPlayer = isPlayer; // The lone survivor / player character
+    this.isPlayer = isPlayer;
 
-    // === RPG IDENTITY ===
     this.id = 'pawn_' + Date.now() + '_' + Math.floor(Math.random() * 10000);
-    this.name = isPlayer ? 'You' : generateName(); // Player pawn is "You"
+    this.name = isPlayer ? 'You' : generateName();
     this.backstory = isPlayer 
       ? 'The last one left who still remembers what the feeds used to feel like.' 
       : generateBackstory();
-    this.traits = isPlayer ? [] : generateTraits(); // Player starts traitless for now
+    this.traits = isPlayer ? [] : generateTraits();
 
-    // === SKILLS (RPG progression) ===
     this.skills = {
       scavenging: isPlayer ? 3 : 1 + Math.floor(Math.random() * 3),
       combat: isPlayer ? 2 : 1 + Math.floor(Math.random() * 3),
@@ -65,7 +62,6 @@ export class Pawn {
       driving: isPlayer ? 2 : 1 + Math.floor(Math.random() * 3)
     };
 
-    // === EQUIPMENT SLOTS ===
     this.equipment = {
       head: null,
       torso: null,
@@ -74,7 +70,6 @@ export class Pawn {
       weapon: null
     };
 
-    // === EXPANDED NEEDS & SANITY ===
     this.needs = {
       health: 100,
       hunger: isPlayer ? 55 : 65 + Math.random() * 15,
@@ -84,10 +79,9 @@ export class Pawn {
       fatigue: isPlayer ? 25 : 30 + Math.random() * 20
     };
 
-    // Personal inventory
     this.inventory = [];
 
-    // Visual (placeholder - will improve)
+    // Visual
     const geometry = new THREE.CylinderGeometry(4, 4, 12, 8);
     const material = new THREE.MeshLambertMaterial({ 
       color: isPlayer ? 0x6b8e23 : 0x8a6f4a 
@@ -105,9 +99,10 @@ export class Pawn {
     this.mesh.add(head);
 
     if (isPlayer) {
-      // Give player a starting weapon for lone survivor start
-      this.equipment.weapon = { name: 'Rusted Pipe', type: 'melee', damage: 8 };
-      this.inventory.push({ name: 'Canned Beans', type: 'food', nutrition: 25 });
+      this.equipment.weapon = { name: 'Rusted Pipe', type: 'melee', damage: 9 };
+      this.inventory.push({ name: 'Canned Beans', type: 'food', nutrition: 28 });
+      this.inventory.push({ name: 'Scrap Metal', type: 'material', weight: 1.5 });
+      this.inventory.push({ name: 'Scrap Metal', type: 'material', weight: 1.5 });
     }
   }
 
@@ -129,23 +124,50 @@ export class Pawn {
       }
     }
 
-    // Stronger needs decay (prototype values)
-    const decayRate = this.isPlayer ? 0.8 : 1.0; // Player slightly more resilient at start
+    const decayRate = this.isPlayer ? 0.8 : 1.0;
     this.needs.hunger = Math.max(0, this.needs.hunger - 0.012 * decayRate);
     this.needs.thirst = Math.max(0, this.needs.thirst - 0.018 * decayRate);
     this.needs.fatigue = Math.min(100, this.needs.fatigue + 0.008);
     this.needs.sanity = Math.max(0, this.needs.sanity - 0.003);
 
-    // Simple sanity effects
     if (this.needs.sanity < 30 && Math.random() < 0.01) {
       console.log(`%c[RUIN] ${this.name} is muttering to themselves...`, 'color:#aa6644');
     }
   }
 
-  // === RPG METHODS ===
+  // === INVENTORY METHODS ===
+  addItem(item) {
+    this.inventory.push(item);
+    console.log(`%c[RUIN] ${this.name} picked up ${item.name}`, 'color:#aadd88');
+  }
+
+  removeItem(itemIdOrName) {
+    const idx = this.inventory.findIndex(i => i.id === itemIdOrName || i.name === itemIdOrName);
+    if (idx !== -1) {
+      return this.inventory.splice(idx, 1)[0];
+    }
+    return null;
+  }
+
+  // Simple inventory list for console
+  listInventory() {
+    console.log(`%c[RUIN] ${this.name}'s Inventory:`, 'color:#c9b896');
+    this.inventory.forEach((item, i) => {
+      console.log(`  ${i+1}. ${item.name} (${item.type})`);
+    });
+  }
+
+  // === CRAFTING ===
+  craft(recipeKey) {
+    // Import here to avoid circular dependency in prototype
+    import('./Item.js').then(({ craftItem }) => {
+      craftItem(this, recipeKey);
+    });
+  }
+
   equipItem(item, slot) {
     if (this.equipment[slot]) {
-      this.inventory.push(this.equipment[slot]); // unequip old
+      this.inventory.push(this.equipment[slot]);
     }
     this.equipment[slot] = item;
     console.log(`%c[RUIN] ${this.name} equipped ${item.name} in ${slot}`, 'color:#c9b896');
@@ -159,7 +181,8 @@ export class Pawn {
       traits: this.traits,
       skills: this.skills,
       needs: this.needs,
-      equipment: this.equipment
+      equipment: this.equipment,
+      inventoryCount: this.inventory.length
     };
-    }
+  }
 }
