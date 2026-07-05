@@ -42,7 +42,7 @@ const mouse = new THREE.Vector2();
 const world = new WorldGenerator(scene);
 world.generate(12345);
 
-// === LONE SURVIVOR START ===
+// === LONE SURVIVOR ===
 const playerPawn = new Pawn(scene, new THREE.Vector3(0, 0, 0), true);
 const pawns = [playerPawn];
 
@@ -55,16 +55,13 @@ workbench.position.set(40, 2, 30);
 scene.add(workbench);
 workbench.userData = { type: 'workbench' };
 
-// Loose items
+// Loose ground items
 function spawnLooseItem(key, x, z) {
   const itemData = createItem(key);
   if (!itemData) return;
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(2, 1, 2),
-    new THREE.MeshLambertMaterial({ color: 0x996633 })
-  );
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 2), new THREE.MeshLambertMaterial({ color: 0x996633 }));
   mesh.position.set(x, 1.5, z);
-  mesh.userData = { type: 'loose_item', itemData: itemData };
+  mesh.userData = { type: 'loose_item', itemData };
   scene.add(mesh);
 }
 
@@ -72,74 +69,41 @@ spawnLooseItem('duct_tape', 15, 10);
 spawnLooseItem('cloth', -20, 25);
 spawnLooseItem('scrap_metal', 35, -15);
 
-// === CHARACTER SHEET FUNCTIONS ===
-window.showCharacterSheet = function(pawn) {
-  const sheet = document.getElementById('character-sheet');
-  if (!sheet || !pawn) return;
+// === SIMPLE BASE BUILDING (Lone Survivor Start) ===
+let placedStructures = [];
 
-  document.getElementById('sheet-name').textContent = pawn.name;
-  document.getElementById('sheet-backstory').textContent = pawn.backstory || 'No memories remain.';
+function placeSimpleCamp(pawn) {
+  if (!pawn) return;
+  
+  const camp = new THREE.Group();
+  
+  // Simple shelter / lean-to
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(10, 5, 1.5),
+    new THREE.MeshLambertMaterial({ color: 0x554433 })
+  );
+  wall.position.set(0, 3, 0);
+  camp.add(wall);
 
-  // Traits
-  const traitsDiv = document.getElementById('sheet-traits');
-  traitsDiv.innerHTML = '';
-  if (pawn.traits && pawn.traits.length > 0) {
-    pawn.traits.forEach(trait => {
-      const div = document.createElement('div');
-      div.className = 'trait';
-      div.innerHTML = `<strong>${trait.name}</strong><br><small>${trait.desc}</small>`;
-      traitsDiv.appendChild(div);
-    });
-  } else {
-    traitsDiv.innerHTML = '<div style="color:#665533">No notable traits yet.</div>';
-  }
+  // Roof
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(11, 1, 6),
+    new THREE.MeshLambertMaterial({ color: 0x443322 })
+  );
+  roof.position.set(0, 6, 2);
+  roof.rotation.x = -0.3;
+  camp.add(roof);
 
-  // Skills
-  const skillsDiv = document.getElementById('sheet-skills');
-  skillsDiv.innerHTML = '';
-  if (pawn.skills) {
-    Object.entries(pawn.skills).forEach(([skill, level]) => {
-      const div = document.createElement('div');
-      div.className = 'skill';
-      div.innerHTML = `${skill.charAt(0).toUpperCase() + skill.slice(1)} <span style="color:#aa8866">${level}</span>`;
-      skillsDiv.appendChild(div);
-    });
-  }
+  camp.position.copy(pawn.mesh.position);
+  camp.position.y = 0;
+  camp.position.x += 12; // place slightly in front
+  
+  camp.userData = { type: 'player_camp', name: 'Makeshift Shelter' };
+  scene.add(camp);
+  placedStructures.push(camp);
 
-  // Equipment
-  const equipDiv = document.getElementById('sheet-equipment');
-  equipDiv.innerHTML = '';
-  if (pawn.equipment) {
-    Object.entries(pawn.equipment).forEach(([slot, item]) => {
-      const div = document.createElement('div');
-      div.className = 'equipment-slot';
-      const itemName = item ? item.name : '— Empty —';
-      div.innerHTML = `${slot.toUpperCase()}: <span style="color:#aa8866">${itemName}</span>`;
-      equipDiv.appendChild(div);
-    });
-  }
-
-  // Inventory
-  const invDiv = document.getElementById('sheet-inventory');
-  invDiv.innerHTML = '';
-  if (pawn.inventory && pawn.inventory.length > 0) {
-    pawn.inventory.forEach(item => {
-      const div = document.createElement('div');
-      div.className = 'inventory-item';
-      div.textContent = item.name;
-      invDiv.appendChild(div);
-    });
-  } else {
-    invDiv.innerHTML = '<div style="color:#665533">Inventory is empty.</div>';
-  }
-
-  sheet.style.display = 'block';
-};
-
-window.hideCharacterSheet = function() {
-  const sheet = document.getElementById('character-sheet');
-  if (sheet) sheet.style.display = 'none';
-};
+  console.log('%c[RUIN] You set up a basic shelter. This could become the start of something.', 'color:#aadd88');
+}
 
 // === INTERACTION ===
 function onMouseDown(event) {
@@ -150,31 +114,24 @@ function onMouseDown(event) {
   if (event.button === 0) {
     const allIntersects = raycaster.intersectObjects(scene.children, true);
 
-    // Pawn selection
+    // Pawn selection + auto sheet
     const pawnIntersects = allIntersects.filter(i => pawns.some(p => p.mesh === i.object));
     if (pawnIntersects.length > 0) {
-      const clickedPawn = pawns.find(p => p.mesh === pawnIntersects[0].object);
-      if (clickedPawn) {
-        selectedPawns = [clickedPawn];
-        console.log(`%c[RUIN] Selected: ${clickedPawn.name}`, 'color:#c9b896');
-        
-        // Auto-open character sheet for player pawn
-        if (clickedPawn.isPlayer) {
-          setTimeout(() => {
-            window.showCharacterSheet(clickedPawn);
-          }, 120);
-        }
+      const clicked = pawns.find(p => p.mesh === pawnIntersects[0].object);
+      if (clicked) {
+        selectedPawns = [clicked];
+        if (clicked.isPlayer) setTimeout(() => window.showCharacterSheet(clicked), 100);
         return;
       }
     }
 
-    // Resource nodes, loose items, workbench (same logic as before)
+    // Resource nodes
     const nodeHit = allIntersects.find(i => i.object.userData?.type === 'resource_node');
     if (nodeHit && selectedPawns.length > 0) {
       const node = nodeHit.object;
       const pawn = selectedPawns[0];
       if (node.userData.remaining > 0) {
-        const item = createItem(node.userData.dropItem);
+        const item = createItem(node.userData.dropItem || 'scrap_metal');
         if (item) {
           pawn.addItem(item);
           node.userData.remaining--;
@@ -185,28 +142,49 @@ function onMouseDown(event) {
       return;
     }
 
-    const looseHit = allIntersects.find(i => i.object.userData?.type === 'loose_item');
-    if (looseHit && selectedPawns.length > 0) {
-      const itemMesh = looseHit.object;
-      const itemData = itemMesh.userData.itemData;
-      selectedPawns[0].addItem(itemData);
-      scene.remove(itemMesh);
-      const idx = looseItems.indexOf(itemMesh);
-      if (idx !== -1) looseItems.splice(idx, 1);
-      console.log(`%c[RUIN] Picked up ${itemData.name}`, 'color:#aadd88');
+    // Vehicle wrecks (better loot chance)
+    const wreckHit = allIntersects.find(i => i.object.userData?.type === 'vehicle_wreck' || i.object.parent?.userData?.type === 'vehicle_wreck');
+    if (wreckHit && selectedPawns.length > 0) {
+      const wreck = wreckHit.object.parent || wreckHit.object;
+      const pawn = selectedPawns[0];
+      
+      if (wreck.userData.remaining > 0) {
+        // Vehicle wrecks give better / multiple items
+        const possibleDrops = ['scrap_metal', 'wire', 'duct_tape', 'fuel_canister'];
+        const dropKey = possibleDrops[Math.floor(Math.random() * possibleDrops.length)];
+        const item = createItem(dropKey);
+        if (item) {
+          pawn.addItem(item);
+          if (Math.random() > 0.6) { // chance for second item
+            const extra = createItem(possibleDrops[Math.floor(Math.random() * possibleDrops.length)]);
+            if (extra) pawn.addItem(extra);
+          }
+          wreck.userData.remaining--;
+          console.log(`%c[RUIN] Stripped parts from ${wreck.userData.name}`, 'color:#aadd88');
+        }
+      } else {
+        console.log('%c[RUIN] This wreck has been picked clean.', 'color:#666');
+      }
       return;
     }
 
-    const workbenchHit = allIntersects.find(i => i.object.userData?.type === 'workbench');
-    if (workbenchHit && selectedPawns.length > 0) {
-      const pawn = selectedPawns[0];
-      console.log('%c[RUIN] === WORKBENCH ===', 'color:#c9b896');
-      Object.keys(Recipes).forEach(key => {
-        const recipe = Recipes[key];
-        const possible = canCraft(pawn, key);
-        console.log(`  ${recipe.name} ${possible ? '✓' : '✗'}`);
+    // Loose items
+    const looseHit = allIntersects.find(i => i.object.userData?.type === 'loose_item');
+    if (looseHit && selectedPawns.length > 0) {
+      const itemMesh = looseHit.object;
+      selectedPawns[0].addItem(itemMesh.userData.itemData);
+      scene.remove(itemMesh);
+      console.log(`%c[RUIN] Picked up item from ground`, 'color:#aadd88');
+      return;
+    }
+
+    // Workbench
+    const benchHit = allIntersects.find(i => i.object.userData?.type === 'workbench');
+    if (benchHit && selectedPawns.length > 0) {
+      console.log('%c[RUIN] === WORKBENCH - Available Recipes ===', 'color:#c9b896');
+      Object.keys(Recipes).forEach(k => {
+        console.log(`  ${Recipes[k].name} ${canCraft(selectedPawns[0], k) ? '✓' : '✗'}`);
       });
-      console.log('%cPress C to quick-craft bandage, or use console: craft("recipe_key")', 'color:#888');
       return;
     }
 
@@ -214,35 +192,26 @@ function onMouseDown(event) {
   }
 
   if (event.button === 2 && selectedPawns.length > 0) {
-    const groundIntersects = raycaster.intersectObject(world.ground);
-    if (groundIntersects.length > 0) {
-      selectedPawns.forEach(p => p.moveTo(groundIntersects[0].point));
-    }
+    const ground = raycaster.intersectObject(world.ground);
+    if (ground.length > 0) selectedPawns.forEach(p => p.moveTo(ground[0].point));
   }
 
-  if (event.button === 0) {
-    isDragging = true;
-    lastMouseX = event.clientX;
-    lastMouseY = event.clientY;
-  }
+  if (event.button === 0) { isDragging = true; lastMouseX = event.clientX; lastMouseY = event.clientY; }
 }
 
 function onMouseUp() { isDragging = false; }
 
 function onMouseMove(event) {
   if (isDragging) {
-    const deltaX = event.clientX - lastMouseX;
-    const deltaY = event.clientY - lastMouseY;
-    camera.position.x -= deltaX * 0.8 / zoom;
-    camera.position.z -= deltaY * 0.8 / zoom;
+    camera.position.x -= (event.clientX - lastMouseX) * 0.8 / zoom;
+    camera.position.z -= (event.clientY - lastMouseY) * 0.8 / zoom;
     lastMouseX = event.clientX;
     lastMouseY = event.clientY;
   }
 }
 
 function onWheel(event) {
-  zoom += event.deltaY * -0.001;
-  zoom = Math.max(0.3, Math.min(zoom, 4));
+  zoom = Math.max(0.3, Math.min(zoom + event.deltaY * -0.001, 4));
   const aspect = window.innerWidth / window.innerHeight;
   const viewSize = 450 / zoom;
   camera.left = -viewSize * aspect;
@@ -256,14 +225,9 @@ function onWheel(event) {
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Tab') {
     e.preventDefault();
-    if (playerPawn) {
-      const sheet = document.getElementById('character-sheet');
-      if (sheet.style.display === 'block') {
-        window.hideCharacterSheet();
-      } else {
-        window.showCharacterSheet(playerPawn);
-      }
-    }
+    const sheet = document.getElementById('character-sheet');
+    if (sheet) sheet.style.display = (sheet.style.display === 'block') ? 'none' : 'block';
+    if (sheet.style.display === 'block' && playerPawn) window.showCharacterSheet(playerPawn);
   }
 
   if (!selectedPawns.length) return;
@@ -274,6 +238,10 @@ window.addEventListener('keydown', (e) => {
   if (e.key.toLowerCase() === 's') {
     const scrap = createItem('scrap_metal');
     if (scrap) pawn.addItem(scrap);
+  }
+  if (e.key.toLowerCase() === 'b') {
+    // Simple base building - place camp
+    placeSimpleCamp(pawn);
   }
 });
 
@@ -300,13 +268,9 @@ function animate() {
   pawns.forEach(p => p.update());
 
   const statusEl = document.getElementById('status');
-  if (statusEl && pawns.length > 0) {
+  if (statusEl) {
     const p = pawns[0];
-    statusEl.innerHTML = `
-      ${p.isPlayer ? 'YOU' : p.name} | 
-      H:${Math.floor(p.needs.health)} Hu:${Math.floor(p.needs.hunger)} 
-      Th:${Math.floor(p.needs.thirst)} San:${Math.floor(p.needs.sanity)} | Inv:${p.inventory.length}
-    `;
+    statusEl.innerHTML = `${p.isPlayer ? 'YOU' : p.name} | H:${Math.floor(p.needs.health)} Hu:${Math.floor(p.needs.hunger)} Th:${Math.floor(p.needs.thirst)} San:${Math.floor(p.needs.sanity)} | Inv:${p.inventory.length}`;
   }
 
   renderer.render(scene, camera);
@@ -314,5 +278,5 @@ function animate() {
 
 animate();
 
-console.log('%c[RUIN RECLAIMER] Character Sheet UI active.', 'color:#c9b896');
-console.log('%cLeft-click yourself or press TAB to open Character Sheet. Gritty terminal style.', 'color:#888');
+console.log('%c[RUIN RECLAIMER] World expanded with vehicle wrecks + simple camp building.', 'color:#c9b896');
+console.log('%cPress B near your location to place a basic shelter. Vehicle wrecks give better loot.', 'color:#888');
