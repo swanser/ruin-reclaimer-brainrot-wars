@@ -55,7 +55,7 @@ workbench.position.set(40, 2, 30);
 scene.add(workbench);
 workbench.userData = { type: 'workbench' };
 
-// Loose ground items
+// Loose items
 function spawnLooseItem(key, x, z) {
   const itemData = createItem(key);
   if (!itemData) return;
@@ -69,40 +69,73 @@ spawnLooseItem('duct_tape', 15, 10);
 spawnLooseItem('cloth', -20, 25);
 spawnLooseItem('scrap_metal', 35, -15);
 
-// === SIMPLE BASE BUILDING (Lone Survivor Start) ===
+// === EXPANDED BUILDING SYSTEM (Lone Survivor) ===
 let placedStructures = [];
 
-function placeSimpleCamp(pawn) {
+function placeStructure(type, pawn) {
   if (!pawn) return;
-  
-  const camp = new THREE.Group();
-  
-  // Simple shelter / lean-to
-  const wall = new THREE.Mesh(
-    new THREE.BoxGeometry(10, 5, 1.5),
-    new THREE.MeshLambertMaterial({ color: 0x554433 })
-  );
-  wall.position.set(0, 3, 0);
-  camp.add(wall);
 
-  // Roof
-  const roof = new THREE.Mesh(
-    new THREE.BoxGeometry(11, 1, 6),
-    new THREE.MeshLambertMaterial({ color: 0x443322 })
-  );
-  roof.position.set(0, 6, 2);
-  roof.rotation.x = -0.3;
-  camp.add(roof);
+  const structure = new THREE.Group();
+  let label = '';
 
-  camp.position.copy(pawn.mesh.position);
-  camp.position.y = 0;
-  camp.position.x += 12; // place slightly in front
-  
-  camp.userData = { type: 'player_camp', name: 'Makeshift Shelter' };
-  scene.add(camp);
-  placedStructures.push(camp);
+  if (type === 'shelter') {
+    // Basic lean-to shelter
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 1.5), new THREE.MeshLambertMaterial({ color: 0x554433 }));
+    wall.position.set(0, 3, 0);
+    structure.add(wall);
 
-  console.log('%c[RUIN] You set up a basic shelter. This could become the start of something.', 'color:#aadd88');
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(11, 1, 6), new THREE.MeshLambertMaterial({ color: 0x443322 }));
+    roof.position.set(0, 6, 2);
+    roof.rotation.x = -0.3;
+    structure.add(roof);
+    label = 'Makeshift Shelter';
+
+  } else if (type === 'stockpile') {
+    // Simple stockpile marker
+    const base = new THREE.Mesh(new THREE.BoxGeometry(8, 1, 8), new THREE.MeshLambertMaterial({ color: 0x3a3228 }));
+    structure.add(base);
+
+    const marker = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 4, 6), new THREE.MeshLambertMaterial({ color: 0x665533 }));
+    marker.position.y = 3;
+    structure.add(marker);
+    label = 'Stockpile Zone';
+
+  } else if (type === 'wall') {
+    // Basic defensive wall segment
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(12, 6, 2), new THREE.MeshLambertMaterial({ color: 0x444444 }));
+    wall.position.set(0, 4, 0);
+    structure.add(wall);
+
+    // Spikes on top
+    for (let i = -4; i <= 4; i += 2) {
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.8, 3, 4), new THREE.MeshLambertMaterial({ color: 0x555555 }));
+      spike.position.set(i, 7.5, 0);
+      structure.add(spike);
+    }
+    label = 'Spike Wall Segment';
+
+  } else if (type === 'barricade') {
+    // Simple spike barricade
+    const base = new THREE.Mesh(new THREE.BoxGeometry(8, 2, 3), new THREE.MeshLambertMaterial({ color: 0x3a2a1a }));
+    structure.add(base);
+
+    for (let i = 0; i < 5; i++) {
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.6, 4, 4), new THREE.MeshLambertMaterial({ color: 0x554433 }));
+      spike.position.set(-3 + i * 1.5, 4, 0);
+      structure.add(spike);
+    }
+    label = 'Spike Barricade';
+  }
+
+  structure.position.copy(pawn.mesh.position);
+  structure.position.y = 0;
+  structure.position.x += 14;
+  structure.userData = { type: 'player_structure', name: label };
+
+  scene.add(structure);
+  placedStructures.push(structure);
+
+  console.log(`%c[RUIN] Placed: ${label}`, 'color:#aadd88');
 }
 
 // === INTERACTION ===
@@ -114,7 +147,6 @@ function onMouseDown(event) {
   if (event.button === 0) {
     const allIntersects = raycaster.intersectObjects(scene.children, true);
 
-    // Pawn selection + auto sheet
     const pawnIntersects = allIntersects.filter(i => pawns.some(p => p.mesh === i.object));
     if (pawnIntersects.length > 0) {
       const clicked = pawns.find(p => p.mesh === pawnIntersects[0].object);
@@ -135,56 +167,43 @@ function onMouseDown(event) {
         if (item) {
           pawn.addItem(item);
           node.userData.remaining--;
-          console.log(`%c[RUIN] Scavenged ${node.userData.name} → ${item.name}`, 'color:#aadd88');
+          console.log(`%c[RUIN] Scavenged ${node.userData.name}`, 'color:#aadd88');
           if (node.userData.remaining <= 0) node.material.color.setHex(0x222222);
         }
       }
       return;
     }
 
-    // Vehicle wrecks (better loot chance)
+    // Vehicle wrecks
     const wreckHit = allIntersects.find(i => i.object.userData?.type === 'vehicle_wreck' || i.object.parent?.userData?.type === 'vehicle_wreck');
     if (wreckHit && selectedPawns.length > 0) {
       const wreck = wreckHit.object.parent || wreckHit.object;
       const pawn = selectedPawns[0];
-      
       if (wreck.userData.remaining > 0) {
-        // Vehicle wrecks give better / multiple items
-        const possibleDrops = ['scrap_metal', 'wire', 'duct_tape', 'fuel_canister'];
-        const dropKey = possibleDrops[Math.floor(Math.random() * possibleDrops.length)];
-        const item = createItem(dropKey);
-        if (item) {
-          pawn.addItem(item);
-          if (Math.random() > 0.6) { // chance for second item
-            const extra = createItem(possibleDrops[Math.floor(Math.random() * possibleDrops.length)]);
-            if (extra) pawn.addItem(extra);
-          }
-          wreck.userData.remaining--;
-          console.log(`%c[RUIN] Stripped parts from ${wreck.userData.name}`, 'color:#aadd88');
+        const drops = ['scrap_metal', 'wire', 'duct_tape', 'fuel_canister'];
+        const item = createItem(drops[Math.floor(Math.random() * drops.length)]);
+        if (item) pawn.addItem(item);
+        if (Math.random() > 0.55) {
+          const extra = createItem(drops[Math.floor(Math.random() * drops.length)]);
+          if (extra) pawn.addItem(extra);
         }
-      } else {
-        console.log('%c[RUIN] This wreck has been picked clean.', 'color:#666');
+        wreck.userData.remaining--;
+        console.log(`%c[RUIN] Stripped ${wreck.userData.name}`, 'color:#aadd88');
       }
       return;
     }
 
-    // Loose items
+    // Loose items & workbench (unchanged logic)
     const looseHit = allIntersects.find(i => i.object.userData?.type === 'loose_item');
     if (looseHit && selectedPawns.length > 0) {
-      const itemMesh = looseHit.object;
-      selectedPawns[0].addItem(itemMesh.userData.itemData);
-      scene.remove(itemMesh);
-      console.log(`%c[RUIN] Picked up item from ground`, 'color:#aadd88');
+      selectedPawns[0].addItem(looseHit.object.userData.itemData);
+      scene.remove(looseHit.object);
       return;
     }
 
-    // Workbench
     const benchHit = allIntersects.find(i => i.object.userData?.type === 'workbench');
     if (benchHit && selectedPawns.length > 0) {
-      console.log('%c[RUIN] === WORKBENCH - Available Recipes ===', 'color:#c9b896');
-      Object.keys(Recipes).forEach(k => {
-        console.log(`  ${Recipes[k].name} ${canCraft(selectedPawns[0], k) ? '✓' : '✗'}`);
-      });
+      console.log('%c[RUIN] WORKBENCH - Press C to craft, or use console', 'color:#c9b896');
       return;
     }
 
@@ -221,13 +240,15 @@ function onWheel(event) {
   camera.updateProjectionMatrix();
 }
 
-// Keyboard
+// Keyboard controls
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Tab') {
     e.preventDefault();
     const sheet = document.getElementById('character-sheet');
-    if (sheet) sheet.style.display = (sheet.style.display === 'block') ? 'none' : 'block';
-    if (sheet.style.display === 'block' && playerPawn) window.showCharacterSheet(playerPawn);
+    if (sheet) {
+      sheet.style.display = sheet.style.display === 'block' ? 'none' : 'block';
+      if (sheet.style.display === 'block' && playerPawn) window.showCharacterSheet(playerPawn);
+    }
   }
 
   if (!selectedPawns.length) return;
@@ -239,10 +260,12 @@ window.addEventListener('keydown', (e) => {
     const scrap = createItem('scrap_metal');
     if (scrap) pawn.addItem(scrap);
   }
-  if (e.key.toLowerCase() === 'b') {
-    // Simple base building - place camp
-    placeSimpleCamp(pawn);
-  }
+
+  // Building hotkeys
+  if (e.key.toLowerCase() === 'b') placeStructure('shelter', pawn);
+  if (e.key.toLowerCase() === 'p') placeStructure('stockpile', pawn);
+  if (e.key.toLowerCase() === 'w') placeStructure('wall', pawn);
+  if (e.key.toLowerCase() === 'd') placeStructure('barricade', pawn);
 });
 
 window.addEventListener('mousedown', onMouseDown);
@@ -278,5 +301,5 @@ function animate() {
 
 animate();
 
-console.log('%c[RUIN RECLAIMER] World expanded with vehicle wrecks + simple camp building.', 'color:#c9b896');
-console.log('%cPress B near your location to place a basic shelter. Vehicle wrecks give better loot.', 'color:#888');
+console.log('%c[RUIN RECLAIMER] More building options added.', 'color:#c9b896');
+console.log('%cB = Shelter | P = Stockpile | W = Wall | D = Spike Barricade', 'color:#888');
